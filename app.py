@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import os
 import shutil
 from io import BytesIO
 import subprocess
@@ -20,7 +21,7 @@ from pillow_heif import register_heif_opener
 register_heif_opener()
 
 APP_DIR = Path(__file__).resolve().parent
-DATA_DIR = APP_DIR / "data"
+DATA_DIR = Path(os.environ.get("FIND_MYSELF_DATA_DIR", APP_DIR / "data")).expanduser().resolve()
 PHOTO_DIR = DATA_DIR / "photos"
 THUMB_DIR = DATA_DIR / "thumbs"
 EXPORT_DIR = DATA_DIR / "exports"

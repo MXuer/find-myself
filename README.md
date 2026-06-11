@@ -51,6 +51,29 @@ chmod +x setup.command start.command
 http://localhost:8501
 ```
 
+### macOS App 启动
+
+也可以生成一个可双击的 macOS app：
+
+```bash
+./packaging/macos/build_app.command
+```
+
+生成后双击：
+
+```text
+dist/Find Myself.app
+```
+
+首次启动会在以下位置创建运行环境和本地数据目录：
+
+```text
+~/Library/Application Support/FindMyself/
+```
+
+这个 app 当前是 macOS 客户端壳：负责安装/启动本地 Python 引擎，并打开本机页面。
+它不上传照片，Streamlit 服务仍只监听 `127.0.0.1`。
+
 ### 4. 使用
 
 1. 打开“建立照片库”。

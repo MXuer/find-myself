@@ -2,6 +2,7 @@
 __pycache__/
 *.pyc
 .DS_Store
+dist/
 data/photos/*
 data/thumbs/*
 data/face_index.npz
