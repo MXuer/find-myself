@@ -1,0 +1,9 @@
+{
+  "project": "mac-face-photo-finder-demo-v5",
+  "changes": [
+    "HEIC and HEIF scan/upload/reference support via pillow-heif",
+    "EXIF orientation correction before face detection",
+    "User-selected export parent directory",
+    "Original HEIC files preserved during export"
+  ]
+}

@@ -1,0 +1,13 @@
+.venv/
+__pycache__/
+*.pyc
+.DS_Store
+data/photos/*
+data/thumbs/*
+data/face_index.npz
+data/metadata.json
+!data/photos/.gitkeep
+!data/thumbs/.gitkeep
+
+data/exports/*
+!data/exports/.gitkeep
