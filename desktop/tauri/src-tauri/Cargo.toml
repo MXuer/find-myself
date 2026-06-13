@@ -1,6 +1,6 @@
 [package]
 name = "find-myself-tauri"
-version = "0.2.1"
+version = "0.2.2"
 description = "Native Tauri client for Find Myself"
 authors = ["MXuer"]
 edition = "2021"

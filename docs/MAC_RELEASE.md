@@ -6,7 +6,7 @@
 
 本仓库当前可生成：
 
-- `dist/Find Myself_0.2.1_arm64.dmg`
+- `dist/Find Myself_0.2.2_arm64.dmg`
 - `desktop/tauri/src-tauri/target/release/bundle/macos/Find Myself.app`
 
 当前构建特性：
@@ -52,7 +52,7 @@ env -u HTTP_PROXY -u HTTPS_PROXY -u ALL_PROXY npm run tauri:build:dmg
 输出：
 
 ```text
-dist/Find Myself_0.2.1_arm64.dmg
+dist/Find Myself_0.2.2_arm64.dmg
 ```
 
 这个产物适合开发测试和受控分发，不适合直接公开下载。
@@ -109,7 +109,7 @@ xcrun notarytool store-credentials "find-myself-notary" \
 codesign -dv --verbose=2 "dist/Find Myself.app"
 codesign --verify --deep --strict --verbose=2 "dist/Find Myself.app"
 spctl --assess --type open --verbose=4 "dist/Find Myself.app"
-spctl --assess --type open --verbose=4 "dist/Find Myself_0.2.1_arm64.dmg"
+spctl --assess --type open --verbose=4 "dist/Find Myself_0.2.2_arm64.dmg"
 ```
 
 此外还应在一台未装开发环境、未信任本机构建产物的干净 Apple Silicon Mac 上下载并打开一次。
