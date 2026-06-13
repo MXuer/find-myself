@@ -1,0 +1,72 @@
+name: Release macOS DMG
+
+on:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    name: Build Apple Silicon DMG
+    runs-on: macos-14
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Setup Rust
+        run: rustup default stable
+
+      - name: Install Node dependencies
+        run: npm ci
+
+      - name: Build DMG
+        run: npm run tauri:build:dmg
+
+      - name: Write release notes
+        run: |
+          cat > release-notes.md <<'EOF'
+          Native macOS Apple Silicon test build.
+
+          Includes:
+          - Tauri desktop workbench UI
+          - Local Python face-search engine bundled with the app
+          - DMG installer for Apple Silicon Macs
+
+          Notes:
+          - This build is unsigned and not notarized, so macOS Gatekeeper may require manual approval.
+          - The first recognition run may download InsightFace model weights locally.
+          - Project code is MIT licensed; model weights follow their own license policy.
+          EOF
+
+      - name: Publish release asset
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG_NAME: ${{ github.ref_name }}
+        run: |
+          set -euo pipefail
+
+          VERSION="${TAG_NAME#v}"
+          TITLE="Find Myself ${VERSION}"
+
+          if gh release view "$TAG_NAME" >/dev/null 2>&1; then
+            gh release upload "$TAG_NAME" dist/*.dmg --clobber
+          else
+            gh release create "$TAG_NAME" dist/*.dmg \
+              --title "$TITLE" \
+              --notes-file release-notes.md
+          fi
