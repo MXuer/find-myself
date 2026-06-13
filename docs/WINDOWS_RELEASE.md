@@ -43,8 +43,8 @@ desktop/tauri/src-tauri/target/release/bundle/nsis/
 示例：
 
 ```bash
-git tag v0.2.2
-git push origin v0.2.2
+git tag v0.2.3
+git push origin v0.2.3
 ```
 
 ## 正式分发前需要补齐
