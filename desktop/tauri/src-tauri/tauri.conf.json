@@ -1,0 +1,39 @@
+{
+  "$schema": "https://schema.tauri.app/config/2",
+  "productName": "Find Myself",
+  "version": "0.2.0",
+  "identifier": "com.mxuer.findmyself",
+  "build": {
+    "beforeDevCommand": "npm run tauri:prepare && npm run tauri:ui:dev",
+    "devUrl": "http://127.0.0.1:1420",
+    "beforeBuildCommand": "npm run tauri:prepare",
+    "frontendDist": "../dist-ui"
+  },
+  "app": {
+    "security": {
+      "csp": null
+    },
+    "windows": [
+      {
+        "label": "main",
+        "title": "照片里找自己",
+        "width": 1240,
+        "height": 900,
+        "minWidth": 980,
+        "minHeight": 760,
+        "resizable": true,
+        "fullscreen": false
+      }
+    ]
+  },
+  "bundle": {
+    "active": true,
+    "targets": "all",
+    "resources": [
+      "../resources/python-app/**/*"
+    ],
+    "macOS": {
+      "minimumSystemVersion": "12.0"
+    }
+  }
+}

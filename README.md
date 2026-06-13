@@ -74,6 +74,39 @@ dist/Find Myself.app
 这个 app 当前是 macOS 客户端壳：负责安装/启动本地 Python 引擎，并打开本机页面。
 它不上传照片，Streamlit 服务仍只监听 `127.0.0.1`。
 
+### 原生 Tauri 客户端
+
+仓库中也提供了原生 Tauri 客户端工程：
+
+```text
+desktop/tauri/
+```
+
+用途：
+
+- 用 Tauri 原生窗口承载应用；
+- 在窗口内管理 Python 运行环境安装；
+- 启动本地 Streamlit 后端并直接在桌面窗口中打开；
+- 把运行时、日志和业务数据写到用户目录，而不是 app bundle。
+
+常用命令：
+
+```bash
+npm install
+npm run tauri:dev
+npm run tauri:build
+```
+
+前提：
+
+- Node.js / npm
+- Rust 工具链
+- macOS 上可用的 `python3`
+
+目前默认不把 `InsightFace buffalo_l` 模型权重随安装包分发；首次真正使用识别时，模型仍按
+InsightFace 现有方式在本机下载。这是为了避免与当前 [MODEL_LICENSE.md](MODEL_LICENSE.md)
+中的“不再分发模型权重”策略冲突。
+
 ### 4. 使用
 
 1. 打开“建立照片库”。

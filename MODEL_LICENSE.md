@@ -23,8 +23,13 @@
 - https://github.com/deepinsight/insightface#license
 - https://github.com/deepinsight/insightface/tree/master/model_zoo
 
-因此，本仓库不会提交、镜像或再分发 `buffalo_l` 模型权重。用户首次运行时如果选择使用
-InsightFace 默认模型，需要自行确认其使用场景符合 InsightFace 的模型许可。
+因此，本仓库不会提交、镜像或再分发 `buffalo_l` 模型权重。即使提供原生桌面客户端，默认策略仍是：
+
+- 安装包只分发代码和运行时，不内置 `buffalo_l` 权重；
+- 用户首次真正使用识别功能时，再由本地运行环境按 InsightFace 现有机制下载模型；
+- 只有在获得明确的权重再分发授权，或替换为允许再分发的模型后，才应把模型随安装包打包。
+
+用户首次运行时如果选择使用 InsightFace 默认模型，需要自行确认其使用场景符合 InsightFace 的模型许可。
 
 ## 使用边界
 

@@ -190,10 +190,11 @@ SearchResult
 
 ### v0.3：桌面客户端 MVP
 
-- Tauri + React UI；
-- Python 引擎子进程；
-- macOS / Windows 本地文件夹导入；
-- 搜索、勾选、导出。
+- Tauri 原生窗口；
+- Python 运行环境由桌面端负责安装和启动；
+- 当前 UI 仍复用现有 Streamlit 检索页面，直接在桌面窗口中打开；
+- 数据目录迁移到用户级应用数据目录；
+- 仍不默认随安装包分发 `buffalo_l` 模型权重。
 
 ### v0.4：体验与可靠性
 

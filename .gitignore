@@ -3,6 +3,12 @@ __pycache__/
 *.pyc
 .DS_Store
 dist/
+node_modules/
+desktop/tauri/dist-ui/
+desktop/tauri/resources/python-app/
+desktop/tauri/src-tauri/gen/
+desktop/tauri/src-tauri/target/
+desktop/tauri/src-tauri/icons/AppIcon.iconset/
 data/photos/*
 data/thumbs/*
 data/face_index.npz

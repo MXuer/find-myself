@@ -1,0 +1,81 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>照片里找自己</title>
+    <link rel="stylesheet" href="./styles.css" />
+  </head>
+  <body>
+    <main class="shell">
+      <section class="hero">
+        <p class="eyebrow">Native Tauri Client</p>
+        <h1>照片里找自己</h1>
+        <p class="lead">
+          原生桌面窗口负责安装运行环境、启动本地识别引擎，并在窗口内打开检索应用。
+        </p>
+      </section>
+
+      <section class="panel">
+        <div class="panel-head">
+          <h2>运行状态</h2>
+          <button id="refreshButton" class="ghost-button" type="button">刷新</button>
+        </div>
+
+        <div id="statusBanner" class="status-banner status-banner--neutral">
+          正在读取本地状态…
+        </div>
+
+        <dl class="facts">
+          <div>
+            <dt>运行环境</dt>
+            <dd id="runtimeState">-</dd>
+          </div>
+          <div>
+            <dt>后端服务</dt>
+            <dd id="backendState">-</dd>
+          </div>
+          <div>
+            <dt>本地数据目录</dt>
+            <dd id="dataDir">-</dd>
+          </div>
+          <div>
+            <dt>运行时目录</dt>
+            <dd id="runtimeDir">-</dd>
+          </div>
+          <div>
+            <dt>日志目录</dt>
+            <dd id="logsDir">-</dd>
+          </div>
+          <div>
+            <dt>服务地址</dt>
+            <dd id="backendUrl">-</dd>
+          </div>
+        </dl>
+
+        <div class="actions">
+          <button id="installButton" class="primary-button" type="button">安装运行环境</button>
+          <button id="startButton" class="primary-button primary-button--dark" type="button">启动桌面应用</button>
+          <button id="stopButton" class="ghost-button" type="button">停止服务</button>
+          <button id="logsButton" class="ghost-button" type="button">打开日志目录</button>
+        </div>
+
+        <p class="note">
+          首次安装会在本机创建独立的 Python 虚拟环境，并通过 pip 安装依赖。应用数据写入用户目录，不写进 app bundle。
+        </p>
+      </section>
+
+      <section class="panel panel--compact">
+        <div class="panel-head">
+          <h2>模型策略</h2>
+        </div>
+        <p id="modelPolicy" class="policy">
+          当前默认不随安装包分发 InsightFace `buffalo_l` 模型权重。首次真正使用识别功能时，仍由本地运行环境自行下载模型；
+          若后续替换为可再分发模型，可在这里改为随安装包分发。
+        </p>
+      </section>
+    </main>
+
+    <script type="module" src="./main.js"></script>
+  </body>
+  </html>
