@@ -1,12 +1,11 @@
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
+use std::env::consts::{ARCH, OS};
 use std::fs::{self, OpenOptions};
-use std::io;
-use std::net::{TcpListener, TcpStream};
+use std::io::{self, Write};
 use std::path::PathBuf;
-use std::process::{Child, Command, Stdio};
+use std::process::Command;
 use std::sync::{Arc, Mutex};
-use std::thread;
-use std::time::{Duration, Instant};
+use std::time::{SystemTime, UNIX_EPOCH};
 use tauri::{AppHandle, Manager, State};
 
 #[derive(Default)]
@@ -16,30 +15,14 @@ struct SharedRuntime {
 
 #[derive(Default)]
 struct RuntimeState {
-    install_phase: InstallPhase,
-    backend: Option<BackendProcess>,
     last_error: Option<String>,
-}
-
-#[derive(Default)]
-enum InstallPhase {
-    #[default]
-    Missing,
-    Installing,
-    Ready,
-    Failed(String),
-}
-
-struct BackendProcess {
-    child: Child,
-    url: String,
 }
 
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
 struct AppStatus {
     runtime: RuntimeStatus,
-    backend: BackendStatus,
+    library: LibraryStats,
     paths: AppPaths,
     model_policy: String,
 }
@@ -48,18 +31,22 @@ struct AppStatus {
 #[serde(rename_all = "camelCase")]
 struct RuntimeStatus {
     ready: bool,
-    installing: bool,
     failed: bool,
     error: Option<String>,
     phase_label: String,
 }
 
-#[derive(Serialize)]
+#[derive(Serialize, Deserialize, Clone)]
 #[serde(rename_all = "camelCase")]
-struct BackendStatus {
-    running: bool,
-    url: Option<String>,
-    phase_label: String,
+struct LibraryStats {
+    data_dir: String,
+    photo_dir: String,
+    thumb_dir: String,
+    export_dir: String,
+    index_ready: bool,
+    photo_count: usize,
+    face_count: usize,
+    vector_count: usize,
 }
 
 #[derive(Serialize)]
@@ -70,10 +57,48 @@ struct AppPaths {
     logs_dir: String,
 }
 
-#[derive(Serialize)]
+#[derive(Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
-struct StartBackendResponse {
-    url: String,
+struct IndexReport {
+    selected: usize,
+    added_photos: usize,
+    added_faces: usize,
+    duplicates: usize,
+    no_face: usize,
+    failed: usize,
+    folder: String,
+    finished_at: String,
+    library_photos: usize,
+    library_faces: usize,
+}
+
+#[derive(Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct SearchResult {
+    source_key: String,
+    original_name: String,
+    photo_path: String,
+    thumb_path: String,
+    score: f64,
+    bbox: Vec<f64>,
+    annotated_image: String,
+    face_thumb: Option<String>,
+}
+
+#[derive(Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct SearchResponse {
+    warning: Option<String>,
+    reference_preview: String,
+    results: Vec<SearchResult>,
+    result_count: usize,
+}
+
+#[derive(Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct ExportResponse {
+    export_path: String,
+    copied: usize,
 }
 
 fn app_support_dir(app: &AppHandle) -> Result<PathBuf, String> {
@@ -85,10 +110,6 @@ fn app_support_dir(app: &AppHandle) -> Result<PathBuf, String> {
     Ok(dir)
 }
 
-fn runtime_dir(app: &AppHandle) -> Result<PathBuf, String> {
-    Ok(app_support_dir(app)?.join(".venv"))
-}
-
 fn logs_dir(app: &AppHandle) -> Result<PathBuf, String> {
     Ok(app_support_dir(app)?.join("logs"))
 }
@@ -97,29 +118,47 @@ fn data_dir(app: &AppHandle) -> Result<PathBuf, String> {
     Ok(app_support_dir(app)?.join("data"))
 }
 
-fn bundled_python_app_dir(app: &AppHandle) -> Result<PathBuf, String> {
-    Ok(app
+fn temp_dir(app: &AppHandle) -> Result<PathBuf, String> {
+    Ok(app_support_dir(app)?.join("tmp"))
+}
+
+fn bundled_backend_dir(app: &AppHandle) -> Result<PathBuf, String> {
+    let resource_dir = app
         .path()
         .resource_dir()
-        .map_err(|err| format!("failed to resolve resource dir: {err}"))?
-        .join("python-app"))
+        .map_err(|err| format!("failed to resolve resource dir: {err}"))?;
+
+    let direct = resource_dir.join("backend");
+    if direct.exists() {
+        return Ok(direct);
+    }
+
+    let nested = resource_dir.join("_up_").join("resources").join("backend");
+    if nested.exists() {
+        return Ok(nested);
+    }
+
+    Ok(direct)
 }
 
-fn runtime_python(app: &AppHandle) -> Result<PathBuf, String> {
-    Ok(runtime_dir(app)?.join("bin").join("python"))
+fn bundled_backend_executable(app: &AppHandle) -> Result<PathBuf, String> {
+    let root = bundled_backend_dir(app)?;
+    let executable = if cfg!(target_os = "macos") {
+        root.join("find-myself-backend").join("find-myself-backend")
+    } else {
+        root.join("find-myself-backend")
+    };
+    Ok(executable)
 }
 
-fn streamlit_log(app: &AppHandle) -> Result<PathBuf, String> {
-    Ok(logs_dir(app)?.join("streamlit.log"))
-}
-
-fn install_log(app: &AppHandle) -> Result<PathBuf, String> {
-    Ok(logs_dir(app)?.join("runtime-install.log"))
+fn engine_log(app: &AppHandle) -> Result<PathBuf, String> {
+    Ok(logs_dir(app)?.join("engine.log"))
 }
 
 fn ensure_dirs(app: &AppHandle) -> Result<(), String> {
     fs::create_dir_all(app_support_dir(app)?).map_err(io_error)?;
     fs::create_dir_all(logs_dir(app)?).map_err(io_error)?;
+    fs::create_dir_all(temp_dir(app)?).map_err(io_error)?;
     let data = data_dir(app)?;
     fs::create_dir_all(data.join("photos")).map_err(io_error)?;
     fs::create_dir_all(data.join("thumbs")).map_err(io_error)?;
@@ -131,224 +170,152 @@ fn io_error(err: io::Error) -> String {
     err.to_string()
 }
 
-fn file_for_append(path: PathBuf) -> Result<Stdio, String> {
-    let file = OpenOptions::new()
+fn is_runtime_ready(app: &AppHandle) -> bool {
+    bundled_backend_executable(app)
+        .map(|path| path.exists())
+        .unwrap_or(false)
+}
+
+fn runtime_status_for(state: &RuntimeState, app: &AppHandle) -> RuntimeStatus {
+    if is_runtime_ready(app) {
+        RuntimeStatus {
+            ready: true,
+            failed: false,
+            error: None,
+            phase_label: format!("原生桌面引擎已内置（{} / {}）", OS, ARCH),
+        }
+    } else {
+        RuntimeStatus {
+            ready: false,
+            failed: true,
+            error: state
+                .last_error
+                .clone()
+                .or_else(|| Some("bundled engine executable is missing".into())),
+            phase_label: "内置引擎缺失".into(),
+        }
+    }
+}
+
+fn append_log(app: &AppHandle, content: &[u8]) -> Result<(), String> {
+    if content.is_empty() {
+        return Ok(());
+    }
+
+    let path = engine_log(app)?;
+    let mut file = OpenOptions::new()
         .create(true)
         .append(true)
         .open(path)
         .map_err(io_error)?;
-    Ok(Stdio::from(file))
-}
-
-fn python3_cmd() -> &'static str {
-    "python3"
-}
-
-fn run_logged_command(program: &str, args: &[String], log_file: PathBuf) -> Result<(), String> {
-    let stdout = file_for_append(log_file.clone())?;
-    let stderr = file_for_append(log_file)?;
-    let status = Command::new(program)
-        .args(args)
-        .stdout(stdout)
-        .stderr(stderr)
-        .status()
-        .map_err(|err| format!("failed to run {program}: {err}"))?;
-
-    if !status.success() {
-        return Err(format!("{program} exited with status {status}"));
-    }
+    file.write_all(content).map_err(io_error)?;
+    file.write_all(b"\n").map_err(io_error)?;
     Ok(())
 }
 
-fn is_runtime_ready(app: &AppHandle) -> bool {
-    runtime_python(app).map(|path| path.exists()).unwrap_or(false)
-}
+fn run_engine(app: &AppHandle, args: &[String]) -> Result<String, String> {
+    ensure_dirs(app)?;
 
-fn choose_free_port() -> Result<u16, String> {
-    for port in 8501..8600 {
-        if TcpListener::bind(("127.0.0.1", port)).is_ok() {
-            return Ok(port);
-        }
-    }
-    Err("no free localhost port found between 8501 and 8599".into())
-}
+    let executable = bundled_backend_executable(app)?;
+    let output = Command::new(&executable)
+        .args(args)
+        .env("FIND_MYSELF_DATA_DIR", data_dir(app)?)
+        .output()
+        .map_err(|err| format!("failed to run bundled engine: {err}"))?;
 
-fn wait_for_server(url: &str, timeout: Duration) -> Result<(), String> {
-    let started = Instant::now();
-    let address = url.trim_start_matches("http://");
-    while started.elapsed() < timeout {
-        if TcpStream::connect(address).is_ok() {
-            return Ok(());
-        }
-        thread::sleep(Duration::from_millis(500));
-    }
-    Err(format!("backend did not start within {} seconds", timeout.as_secs()))
-}
+    let _ = append_log(app, &output.stderr);
 
-fn runtime_status_for(state: &RuntimeState, app: &AppHandle) -> RuntimeStatus {
-    let runtime_exists = is_runtime_ready(app);
-    match &state.install_phase {
-        InstallPhase::Installing => RuntimeStatus {
-            ready: false,
-            installing: true,
-            failed: false,
-            error: None,
-            phase_label: "安装中".into(),
-        },
-        InstallPhase::Ready if runtime_exists => RuntimeStatus {
-            ready: true,
-            installing: false,
-            failed: false,
-            error: None,
-            phase_label: "已就绪".into(),
-        },
-        InstallPhase::Failed(err) => RuntimeStatus {
-            ready: false,
-            installing: false,
-            failed: true,
-            error: Some(err.clone()),
-            phase_label: "安装失败".into(),
-        },
-        _ if runtime_exists => RuntimeStatus {
-            ready: true,
-            installing: false,
-            failed: false,
-            error: None,
-            phase_label: "已就绪".into(),
-        },
-        _ => RuntimeStatus {
-            ready: false,
-            installing: false,
-            failed: false,
-            error: None,
-            phase_label: "未安装".into(),
-        },
-    }
-}
-
-fn backend_status_for(state: &mut RuntimeState) -> BackendStatus {
-    let mut running = false;
-    let mut url = None;
-
-    if let Some(process) = state.backend.as_mut() {
-      match process.child.try_wait() {
-          Ok(None) => {
-              running = true;
-              url = Some(process.url.clone());
-          }
-          Ok(Some(_)) => {
-              state.backend = None;
-          }
-          Err(err) => {
-              state.last_error = Some(format!("failed to query backend process: {err}"));
-              state.backend = None;
-          }
-      }
-    }
-
-    BackendStatus {
-        running,
-        url: url.clone(),
-        phase_label: if running {
-            "运行中".into()
+    if !output.status.success() {
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        let stdout = String::from_utf8_lossy(&output.stdout);
+        let message = if !stderr.trim().is_empty() {
+            stderr.trim().to_string()
+        } else if !stdout.trim().is_empty() {
+            stdout.trim().to_string()
         } else {
-            "未启动".into()
-        },
+            format!("engine exited with status {}", output.status)
+        };
+        return Err(message);
+    }
+
+    String::from_utf8(output.stdout)
+        .map(|text| text.trim().to_string())
+        .map_err(|err| format!("engine returned invalid UTF-8: {err}"))
+}
+
+fn write_temp_file(app: &AppHandle, filename: &str, bytes: &[u8]) -> Result<PathBuf, String> {
+    let extension = PathBuf::from(filename)
+        .extension()
+        .and_then(|item| item.to_str())
+        .unwrap_or("bin")
+        .to_string();
+    let stamp = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map_err(|err| err.to_string())?
+        .as_millis();
+    let path = temp_dir(app)?.join(format!("input-{stamp}.{extension}"));
+    fs::write(&path, bytes).map_err(io_error)?;
+    Ok(path)
+}
+
+fn choose_folder_macos(prompt: &str) -> Result<String, String> {
+    let escaped = prompt.replace('"', "\\\"");
+    let script = format!("POSIX path of (choose folder with prompt \"{escaped}\")");
+    let output = Command::new("osascript")
+        .arg("-e")
+        .arg(script)
+        .output()
+        .map_err(|err| format!("failed to open folder picker: {err}"))?;
+
+    if !output.status.success() {
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        return Err(stderr.trim().to_string());
+    }
+
+    Ok(String::from_utf8_lossy(&output.stdout).trim().to_string())
+}
+
+fn update_last_error(shared: &State<SharedRuntime>, message: Option<String>) {
+    if let Ok(mut state) = shared.inner.lock() {
+        state.last_error = message;
     }
 }
 
 fn current_status(app: &AppHandle, shared: &SharedRuntime) -> Result<AppStatus, String> {
     ensure_dirs(app)?;
-    let mut state = shared.inner.lock().map_err(|_| "runtime state poisoned".to_string())?;
+    let state = shared
+        .inner
+        .lock()
+        .map_err(|_| "runtime state poisoned".to_string())?;
     let runtime = runtime_status_for(&state, app);
-    let backend = backend_status_for(&mut state);
+    drop(state);
+
+    let library = if runtime.ready {
+        let raw = run_engine(app, &[String::from("stats")])?;
+        serde_json::from_str::<LibraryStats>(&raw).map_err(|err| format!("invalid stats payload: {err}"))?
+    } else {
+        LibraryStats {
+            data_dir: data_dir(app)?.display().to_string(),
+            photo_dir: data_dir(app)?.join("photos").display().to_string(),
+            thumb_dir: data_dir(app)?.join("thumbs").display().to_string(),
+            export_dir: data_dir(app)?.join("exports").display().to_string(),
+            index_ready: false,
+            photo_count: 0,
+            face_count: 0,
+            vector_count: 0,
+        }
+    };
 
     Ok(AppStatus {
         runtime,
-        backend,
+        library,
         paths: AppPaths {
             data_dir: data_dir(app)?.display().to_string(),
-            runtime_dir: runtime_dir(app)?.display().to_string(),
+            runtime_dir: bundled_backend_dir(app)?.display().to_string(),
             logs_dir: logs_dir(app)?.display().to_string(),
         },
-        model_policy: "默认不随安装包分发 InsightFace buffalo_l 模型权重。首次真正使用识别功能时，运行环境仍会按 InsightFace 现有机制在本地下载模型；若未来获得分发授权或替换为允许再分发的模型，再改为随安装包分发。".into(),
+        model_policy: "桌面应用已去掉 Streamlit 页面，前端直接调用本地识别引擎。默认仍不随安装包分发 InsightFace buffalo_l 模型权重；首次真正执行识别时，仍由内置引擎在本地下载模型。".into(),
     })
-}
-
-fn install_runtime_inner(app: &AppHandle) -> Result<(), String> {
-    ensure_dirs(app)?;
-    let runtime = runtime_dir(app)?;
-    let log_file = install_log(app)?;
-    let python_app = bundled_python_app_dir(app)?;
-    let requirements = python_app.join("requirements.txt");
-
-    if is_runtime_ready(app) {
-        return Ok(());
-    }
-
-    if runtime.exists() {
-        fs::remove_dir_all(&runtime).map_err(io_error)?;
-    }
-
-    run_logged_command(
-        python3_cmd(),
-        &[
-            "-m".into(),
-            "venv".into(),
-            runtime.display().to_string(),
-        ],
-        log_file.clone(),
-    )?;
-
-    let runtime_python_path = runtime_python(app)?;
-    let runtime_python_text = runtime_python_path.display().to_string();
-
-    run_logged_command(
-        &runtime_python_text,
-        &[
-            "-m".into(),
-            "pip".into(),
-            "install".into(),
-            "--upgrade".into(),
-            "pip".into(),
-            "setuptools".into(),
-            "wheel".into(),
-        ],
-        log_file.clone(),
-    )?;
-
-    run_logged_command(
-        &runtime_python_text,
-        &[
-            "-m".into(),
-            "pip".into(),
-            "install".into(),
-            "--only-binary=insightface".into(),
-            "insightface==1.0.1".into(),
-        ],
-        log_file.clone(),
-    )?;
-
-    run_logged_command(
-        &runtime_python_text,
-        &[
-            "-m".into(),
-            "pip".into(),
-            "install".into(),
-            "-r".into(),
-            requirements.display().to_string(),
-        ],
-        log_file,
-    )?;
-
-    Ok(())
-}
-
-fn stop_backend_inner(state: &mut RuntimeState) {
-    if let Some(mut process) = state.backend.take() {
-        let _ = process.child.kill();
-        let _ = process.child.wait();
-    }
 }
 
 #[tauri::command]
@@ -357,117 +324,80 @@ fn app_status(app: AppHandle, shared: State<SharedRuntime>) -> Result<AppStatus,
 }
 
 #[tauri::command]
-fn install_runtime(app: AppHandle, shared: State<SharedRuntime>) -> Result<(), String> {
-    ensure_dirs(&app)?;
-    {
-        let mut state = shared.inner.lock().map_err(|_| "runtime state poisoned".to_string())?;
-        if matches!(state.install_phase, InstallPhase::Installing) {
-            return Ok(());
-        }
-        if is_runtime_ready(&app) {
-            state.install_phase = InstallPhase::Ready;
-            return Ok(());
-        }
-        state.install_phase = InstallPhase::Installing;
-        state.last_error = None;
-    }
-
-    let app_handle = app.clone();
-    let shared_runtime = shared.inner.clone();
-    thread::spawn(move || {
-        let result = install_runtime_inner(&app_handle);
-        if let Ok(mut state) = shared_runtime.lock() {
-            match result {
-                Ok(()) => {
-                    state.install_phase = InstallPhase::Ready;
-                    state.last_error = None;
-                }
-                Err(err) => {
-                    state.install_phase = InstallPhase::Failed(err.clone());
-                    state.last_error = Some(err);
-                }
-            }
-        }
-    });
-
-    Ok(())
+fn choose_folder(prompt: String) -> Result<String, String> {
+    choose_folder_macos(&prompt)
 }
 
 #[tauri::command]
-fn start_backend(app: AppHandle, shared: State<SharedRuntime>) -> Result<StartBackendResponse, String> {
-    ensure_dirs(&app)?;
+fn index_folder(app: AppHandle, shared: State<SharedRuntime>, folder: String, recursive: bool) -> Result<IndexReport, String> {
+    let args = vec![
+        String::from("index-folder"),
+        String::from("--folder"),
+        folder,
+        String::from("--recursive"),
+        if recursive { String::from("true") } else { String::from("false") },
+    ];
 
-    {
-        let mut state = shared.inner.lock().map_err(|_| "runtime state poisoned".to_string())?;
-        if let Some(process) = state.backend.as_mut() {
-            if process.child.try_wait().map_err(|err| err.to_string())?.is_none() {
-                return Ok(StartBackendResponse {
-                    url: process.url.clone(),
-                });
-            }
-            state.backend = None;
-        }
-    }
-
-    if !is_runtime_ready(&app) {
-        return Err("runtime is not installed yet".into());
-    }
-
-    let port = choose_free_port()?;
-    let url = format!("http://127.0.0.1:{port}");
-    let log_file = streamlit_log(&app)?;
-    let data_path = data_dir(&app)?;
-    let python_app = bundled_python_app_dir(&app)?;
-    let python = runtime_python(&app)?;
-    let app_file = python_app.join("app.py");
-
-    let stdout = file_for_append(log_file.clone())?;
-    let stderr = file_for_append(log_file)?;
-    let child = Command::new(&python)
-        .arg("-m")
-        .arg("streamlit")
-        .arg("run")
-        .arg(app_file)
-        .arg("--server.address")
-        .arg("127.0.0.1")
-        .arg("--server.port")
-        .arg(port.to_string())
-        .arg("--server.headless")
-        .arg("true")
-        .arg("--browser.gatherUsageStats")
-        .arg("false")
-        .env("FIND_MYSELF_DATA_DIR", data_path)
-        .current_dir(&python_app)
-        .stdout(stdout)
-        .stderr(stderr)
-        .spawn()
-        .map_err(|err| format!("failed to spawn backend: {err}"))?;
-
-    {
-        let mut state = shared.inner.lock().map_err(|_| "runtime state poisoned".to_string())?;
-        state.backend = Some(BackendProcess {
-            child,
-            url: url.clone(),
-        });
-    }
-
-    if let Err(err) = wait_for_server(&url, Duration::from_secs(45)) {
-        if let Ok(mut state) = shared.inner.lock() {
-            stop_backend_inner(&mut state);
-        }
-        return Err(err);
-    }
-
-    Ok(StartBackendResponse { url })
+    let raw = run_engine(&app, &args)?;
+    let report = serde_json::from_str::<IndexReport>(&raw).map_err(|err| format!("invalid index payload: {err}"))?;
+    update_last_error(&shared, None);
+    Ok(report)
 }
 
 #[tauri::command]
-fn stop_backend(app: AppHandle, shared: State<SharedRuntime>) -> Result<(), String> {
-    let mut state = shared.inner.lock().map_err(|_| "runtime state poisoned".to_string())?;
-    stop_backend_inner(&mut state);
-    state.last_error = None;
-    let _ = app;
-    Ok(())
+fn search_reference(
+    app: AppHandle,
+    shared: State<SharedRuntime>,
+    filename: String,
+    bytes: Vec<u8>,
+    threshold: f64,
+    limit: usize,
+) -> Result<SearchResponse, String> {
+    let path = write_temp_file(&app, &filename, &bytes)?;
+    let args = vec![
+        String::from("search-image"),
+        String::from("--image"),
+        path.display().to_string(),
+        String::from("--threshold"),
+        threshold.to_string(),
+        String::from("--limit"),
+        limit.to_string(),
+    ];
+
+    let raw = run_engine(&app, &args)?;
+    let response = serde_json::from_str::<SearchResponse>(&raw).map_err(|err| format!("invalid search payload: {err}"))?;
+    let _ = fs::remove_file(path);
+    update_last_error(&shared, None);
+    Ok(response)
+}
+
+#[tauri::command]
+fn export_matches(
+    app: AppHandle,
+    shared: State<SharedRuntime>,
+    parent_dir: String,
+    source_keys: Vec<String>,
+) -> Result<ExportResponse, String> {
+    let payload = serde_json::to_string(&source_keys).map_err(|err| err.to_string())?;
+    let args = vec![
+        String::from("export-matches"),
+        String::from("--parent-dir"),
+        parent_dir,
+        String::from("--source-keys-json"),
+        payload,
+    ];
+    let raw = run_engine(&app, &args)?;
+    let response = serde_json::from_str::<ExportResponse>(&raw).map_err(|err| format!("invalid export payload: {err}"))?;
+    update_last_error(&shared, None);
+    Ok(response)
+}
+
+#[tauri::command]
+fn reset_index(app: AppHandle, shared: State<SharedRuntime>) -> Result<LibraryStats, String> {
+    let raw = run_engine(&app, &[String::from("reset-index")])?;
+    let stats = serde_json::from_str::<LibraryStats>(&raw).map_err(|err| format!("invalid reset payload: {err}"))?;
+    update_last_error(&shared, None);
+    Ok(stats)
 }
 
 #[tauri::command]
@@ -481,6 +411,21 @@ fn open_logs_dir(app: AppHandle) -> Result<(), String> {
     Ok(())
 }
 
+#[tauri::command]
+fn reveal_path(path: String) -> Result<(), String> {
+    let target = PathBuf::from(path);
+    let mut command = Command::new("open");
+    if target.is_dir() {
+        command.arg(target);
+    } else {
+        command.arg("-R").arg(target);
+    }
+    command
+        .status()
+        .map_err(|err| format!("failed to reveal path: {err}"))?;
+    Ok(())
+}
+
 pub fn run() {
     tauri::Builder::default()
         .manage(SharedRuntime::default())
@@ -490,10 +435,13 @@ pub fn run() {
         })
         .invoke_handler(tauri::generate_handler![
             app_status,
-            install_runtime,
-            start_backend,
-            stop_backend,
-            open_logs_dir
+            choose_folder,
+            index_folder,
+            search_reference,
+            export_matches,
+            reset_index,
+            open_logs_dir,
+            reveal_path
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

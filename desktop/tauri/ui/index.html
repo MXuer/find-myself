@@ -7,75 +7,227 @@
     <link rel="stylesheet" href="./styles.css" />
   </head>
   <body>
-    <main class="shell">
-      <section class="hero">
-        <p class="eyebrow">Native Tauri Client</p>
-        <h1>照片里找自己</h1>
-        <p class="lead">
-          原生桌面窗口负责安装运行环境、启动本地识别引擎，并在窗口内打开检索应用。
-        </p>
-      </section>
-
-      <section class="panel">
-        <div class="panel-head">
-          <h2>运行状态</h2>
-          <button id="refreshButton" class="ghost-button" type="button">刷新</button>
+    <main class="app-shell">
+      <aside class="sidebar">
+        <div class="brand">
+          <div class="brand-mark">FM</div>
+          <div>
+            <p class="brand-kicker">Local Photo Search</p>
+            <h1>Find Myself</h1>
+          </div>
         </div>
 
-        <div id="statusBanner" class="status-banner status-banner--neutral">
-          正在读取本地状态…
-        </div>
+        <nav class="nav-group">
+          <button class="nav-item nav-item--active" type="button">照片工作台</button>
+          <button class="nav-item" id="revealDataButton" type="button">打开数据目录</button>
+          <button class="nav-item" id="logsButton" type="button">打开日志目录</button>
+        </nav>
 
-        <dl class="facts">
-          <div>
-            <dt>运行环境</dt>
-            <dd id="runtimeState">-</dd>
+        <section class="library-card">
+          <p class="sidebar-label">当前照片库</p>
+          <div class="library-meter">
+            <div><strong id="photoCount">0</strong><span>照片</span></div>
+            <div><strong id="faceCount">0</strong><span>人脸</span></div>
+            <div><strong id="indexState">未准备</strong><span>状态</span></div>
           </div>
-          <div>
-            <dt>后端服务</dt>
-            <dd id="backendState">-</dd>
-          </div>
-          <div>
-            <dt>本地数据目录</dt>
-            <dd id="dataDir">-</dd>
-          </div>
-          <div>
-            <dt>运行时目录</dt>
-            <dd id="runtimeDir">-</dd>
-          </div>
-          <div>
-            <dt>日志目录</dt>
-            <dd id="logsDir">-</dd>
-          </div>
-          <div>
-            <dt>服务地址</dt>
-            <dd id="backendUrl">-</dd>
-          </div>
-        </dl>
+        </section>
 
-        <div class="actions">
-          <button id="installButton" class="primary-button" type="button">安装运行环境</button>
-          <button id="startButton" class="primary-button primary-button--dark" type="button">启动桌面应用</button>
-          <button id="stopButton" class="ghost-button" type="button">停止服务</button>
-          <button id="logsButton" class="ghost-button" type="button">打开日志目录</button>
-        </div>
+        <section class="sidebar-card sidebar-card--compact">
+          <p class="sidebar-label">本地优先</p>
+          <p class="muted-copy">照片、索引和导出默认只保存在这台电脑上。</p>
+        </section>
+      </aside>
 
-        <p class="note">
-          首次安装会在本机创建独立的 Python 虚拟环境，并通过 pip 安装依赖。应用数据写入用户目录，不写进 app bundle。
-        </p>
-      </section>
+      <section class="workspace">
+        <header class="topbar">
+          <div>
+            <p class="kicker">Photo Workbench</p>
+            <h2>从一批照片里找到自己</h2>
+          </div>
+          <div class="topbar-actions">
+            <button id="refreshButton" class="secondary-button" type="button">刷新</button>
+            <button id="resetButton" class="ghost-danger-button" type="button">清空照片库</button>
+          </div>
+        </header>
 
-      <section class="panel panel--compact">
-        <div class="panel-head">
-          <h2>模型策略</h2>
-        </div>
-        <p id="modelPolicy" class="policy">
-          当前默认不随安装包分发 InsightFace `buffalo_l` 模型权重。首次真正使用识别功能时，仍由本地运行环境自行下载模型；
-          若后续替换为可再分发模型，可在这里改为随安装包分发。
-        </p>
+        <div id="statusBanner" class="status-banner">正在读取本地状态...</div>
+
+        <section class="setup-grid">
+          <article class="setup-panel setup-panel--reference">
+            <div class="panel-header">
+              <div>
+                <span class="step-badge">1</span>
+                <p class="panel-kicker">我是谁</p>
+                <h3>选择参考照片</h3>
+              </div>
+              <button id="clearReferenceButton" class="text-button" type="button">清空</button>
+            </div>
+
+            <label class="upload-tile" for="referenceInput">
+              <input id="referenceInput" type="file" accept=".jpg,.jpeg,.png,.webp,.heic,.heif" />
+              <img id="referencePreview" alt="参考照片预览" />
+              <div class="upload-tile__copy">
+                <strong id="referenceName">上传一张清晰参考照</strong>
+                <span id="referenceHint">最好是正脸、少遮挡、只有自己。</span>
+              </div>
+            </label>
+          </article>
+
+          <article class="setup-panel setup-panel--library">
+            <div class="panel-header">
+              <div>
+                <span class="step-badge">2</span>
+                <p class="panel-kicker">在哪里找</p>
+                <h3>导入待搜索照片</h3>
+              </div>
+            </div>
+
+            <div class="folder-picker">
+              <input id="folderPath" type="text" readonly placeholder="选择毕业照、团建照或活动照片文件夹" />
+              <button id="pickFolderButton" class="secondary-button secondary-button--strong" type="button">选择文件夹</button>
+            </div>
+
+            <label class="checkbox-row">
+              <input id="recursiveToggle" type="checkbox" checked />
+              <span>包含子文件夹</span>
+            </label>
+
+            <div class="library-actions">
+              <button id="indexButton" class="secondary-button secondary-button--strong" type="button">准备照片库</button>
+              <span id="libraryHint">选择文件夹后建立索引。</span>
+            </div>
+          </article>
+
+          <article class="setup-panel setup-panel--search">
+            <div class="panel-header">
+              <div>
+                <span class="step-badge">3</span>
+                <p class="panel-kicker">怎么找</p>
+                <h3>选择搜索策略</h3>
+              </div>
+            </div>
+
+            <div class="preset-group" role="group" aria-label="搜索策略">
+              <button class="preset-button" data-preset="strict" type="button">
+                <strong>精准</strong>
+                <span>少误报</span>
+              </button>
+              <button class="preset-button preset-button--active" data-preset="balanced" type="button">
+                <strong>平衡</strong>
+                <span>推荐</span>
+              </button>
+              <button class="preset-button" data-preset="wide" type="button">
+                <strong>尽量多找</strong>
+                <span>少漏掉</span>
+              </button>
+            </div>
+
+            <details class="advanced-settings">
+              <summary>高级设置</summary>
+              <label for="thresholdRange">相似度阈值 <strong id="thresholdValue">0.38</strong></label>
+              <input id="thresholdRange" type="range" min="0.2" max="0.8" step="0.01" value="0.38" />
+              <label for="limitRange">最多返回 <strong id="limitValue">60</strong> 张照片</label>
+              <input id="limitRange" type="range" min="12" max="120" step="6" value="60" />
+            </details>
+
+            <button id="searchButton" class="primary-button primary-button--hero" type="button">开始找照片</button>
+          </article>
+        </section>
+
+        <section class="results-layout">
+          <div class="results-canvas">
+            <div class="results-toolbar">
+              <div>
+                <p class="panel-kicker">Results</p>
+                <h3>筛选命中照片</h3>
+              </div>
+              <div class="results-toolbar__right">
+                <strong id="resultCount">0 张</strong>
+                <div class="view-toggle">
+                  <button id="lightTableViewButton" class="view-toggle__button view-toggle__button--active" type="button">筛选台</button>
+                  <button id="stackViewButton" class="view-toggle__button" type="button">堆叠</button>
+                  <button id="gridViewButton" class="view-toggle__button" type="button">网格</button>
+                </div>
+              </div>
+            </div>
+
+            <div id="lightTableView" class="light-table" hidden>
+              <div class="light-table__main">
+                <img id="lightTableImage" alt="当前候选照片" />
+                <div class="light-table__overlay">
+                  <span id="lightTableScore">-</span>
+                  <strong id="lightTableName">尚未选择</strong>
+                </div>
+              </div>
+              <div class="filmstrip" id="filmstrip"></div>
+            </div>
+
+            <div id="resultsStack" class="results-stack" hidden></div>
+            <div id="resultsGrid" class="results-grid" hidden></div>
+            <div id="emptyState" class="empty-state">先导入照片库，再选择参考照开始搜索。</div>
+          </div>
+
+          <aside class="inspector">
+            <div class="panel-header">
+              <div>
+                <p class="panel-kicker">Compare</p>
+                <h3>确认是不是你</h3>
+              </div>
+              <span id="inspectorBadge" class="score-pill">-</span>
+            </div>
+
+            <div class="face-compare">
+              <div>
+                <span>参考脸</span>
+                <img id="inspectorReference" alt="参考脸" />
+              </div>
+              <div>
+                <span>匹配脸</span>
+                <img id="inspectorFace" alt="匹配人脸" />
+              </div>
+            </div>
+
+            <img id="inspectorImage" class="inspector-image" alt="当前命中预览" />
+
+            <div class="inspector-meta">
+              <strong id="inspectorName">尚未选择</strong>
+              <span id="inspectorScore">相似度 -</span>
+            </div>
+
+            <div class="decision-row">
+              <button id="rejectButton" class="secondary-button" type="button">不是我</button>
+              <button id="maybeButton" class="secondary-button secondary-button--strong" type="button">待确认</button>
+              <button id="confirmButton" class="primary-button" type="button">是我</button>
+            </div>
+
+            <div class="action-group">
+              <div class="action-row">
+                <button id="openOriginalButton" class="secondary-button" type="button">定位原图</button>
+                <button id="exportCurrentButton" class="secondary-button secondary-button--strong" type="button">导出当前</button>
+              </div>
+              <button id="exportButton" class="primary-button" type="button">导出已确认照片</button>
+            </div>
+
+            <details class="details-panel">
+              <summary>详情</summary>
+              <div class="info-tile"><span>文件路径</span><strong id="inspectorPath">-</strong></div>
+              <div class="info-tile"><span>所在目录</span><strong id="inspectorDir">-</strong></div>
+              <div class="info-tile"><span>人脸框</span><strong id="inspectorBbox">-</strong></div>
+              <div class="info-tile"><span>导出状态</span><strong id="inspectorExportState">未导出</strong></div>
+              <div class="info-tile"><span>本次搜索</span><strong id="sessionSummary">0 条结果</strong></div>
+            </details>
+          </aside>
+        </section>
       </section>
     </main>
 
+    <div id="busyOverlay" class="busy-overlay" hidden>
+      <div class="busy-card">
+        <div class="spinner"></div>
+        <strong id="busyText">处理中...</strong>
+      </div>
+    </div>
+
     <script type="module" src="./main.js"></script>
   </body>
-  </html>
+</html>

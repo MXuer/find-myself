@@ -30,7 +30,7 @@
     "active": true,
     "targets": "all",
     "resources": [
-      "../resources/python-app/**/*"
+      "../resources/backend/**/*"
     ],
     "macOS": {
       "minimumSystemVersion": "12.0"

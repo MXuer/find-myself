@@ -28,9 +28,9 @@ apps/
 
 - macOS：Tauri `.app`，支持 Apple Silicon / Intel；
 - Windows：Tauri `.msi` 或 `.exe` 安装包；
-- UI：React + TypeScript；
+- UI：Tauri 前端页面，可继续演进到 React + TypeScript；
 - Python 引擎：PyInstaller 打包为随应用分发的本地二进制；
-- 通信方式：前期用子进程 JSON-RPC/stdin-stdout，后期可升级为本地 HTTP 或 gRPC。
+- 通信方式：前期用子进程 JSON/stdout，后期可升级为更稳定的 JSON-RPC。
 
 为什么不是直接把 Streamlit 打包成客户端：
 
@@ -191,8 +191,9 @@ SearchResult
 ### v0.3：桌面客户端 MVP
 
 - Tauri 原生窗口；
-- Python 运行环境由桌面端负责安装和启动；
-- 当前 UI 仍复用现有 Streamlit 检索页面，直接在桌面窗口中打开；
+- Python 后端和依赖随安装包分发；
+- 前端直接调用本地引擎，不再启动 Streamlit；
+- 深色照片优先布局，包含照片库、搜索工作台、结果网格和检查面板；
 - 数据目录迁移到用户级应用数据目录；
 - 仍不默认随安装包分发 `buffalo_l` 模型权重。
 

@@ -13,7 +13,34 @@
 - 下载匹配原图副本
 - 所有业务数据保存在本机
 
-## 最快启动方式
+## macOS 桌面版
+
+当前仓库已经可以生成一个 `Apple Silicon` Mac 用的桌面安装包：
+
+```text
+dist/Find Myself_0.2.0_arm64.dmg
+```
+
+当前桌面版状态：
+
+- 安装包内置 Python 人脸检索引擎与依赖；
+- 目标机器不需要预装 `python3`；
+- 桌面窗口直接渲染原生 Tauri UI，不再依赖 Streamlit 页面；
+- 首次真正执行识别时，仍会在本机下载 InsightFace 模型；
+- 当前构建默认只有 ad-hoc 签名，还没有完成 Apple Developer ID 签名与 notarization。
+
+这意味着它已经适合开发测试和受控分发，但还不能算“普通用户下载后无拦截直接安装”的最终公开版。
+
+要构建桌面版：
+
+```bash
+npm install
+env -u HTTP_PROXY -u HTTPS_PROXY -u ALL_PROXY npm run tauri:build:dmg
+```
+
+更多发布细节见 [docs/MAC_RELEASE.md](docs/MAC_RELEASE.md)。
+
+## Python 原型最快启动方式
 
 ### 1. 安装 Python
 
@@ -51,7 +78,7 @@ chmod +x setup.command start.command
 http://localhost:8501
 ```
 
-### macOS App 启动
+### 旧版 macOS App 壳
 
 也可以生成一个可双击的 macOS app：
 
@@ -82,12 +109,13 @@ dist/Find Myself.app
 desktop/tauri/
 ```
 
-用途：
+当前实现：
 
 - 用 Tauri 原生窗口承载应用；
-- 在窗口内管理 Python 运行环境安装；
-- 启动本地 Streamlit 后端并直接在桌面窗口中打开；
-- 把运行时、日志和业务数据写到用户目录，而不是 app bundle。
+- 安装包内置 Python 人脸检索引擎与依赖；
+- 前端直接通过 Tauri command 调用本地引擎，不再启动 Streamlit；
+- 把运行时、日志和业务数据写到用户目录，而不是 app bundle；
+- 当前界面为深色照片优先布局，包含建库、检索、结果网格和右侧检查面板。
 
 常用命令：
 
@@ -97,15 +125,21 @@ npm run tauri:dev
 npm run tauri:build
 ```
 
-前提：
+本机构建前提：
 
 - Node.js / npm
 - Rust 工具链
-- macOS 上可用的 `python3`
+- macOS 上可用的 `python3`，仅构建机需要；最终用户不需要
 
 目前默认不把 `InsightFace buffalo_l` 模型权重随安装包分发；首次真正使用识别时，模型仍按
 InsightFace 现有方式在本机下载。这是为了避免与当前 [MODEL_LICENSE.md](MODEL_LICENSE.md)
 中的“不再分发模型权重”策略冲突。
+
+当前发布限制：
+
+- 当前只产出 `arm64` 安装包；
+- 当前机器没有 `Developer ID Application` 证书，因此产物未完成正式签名与公证；
+- 没有签名/公证时，普通用户可能会遇到 Gatekeeper 拦截。
 
 ### 4. 使用
 
@@ -143,13 +177,14 @@ InsightFace 模型默认缓存在：
 
 ## 技术说明
 
-- UI：Streamlit
+- Python 原型 UI：Streamlit
+- 桌面 UI：Tauri + 原生前端页面
 - 人脸检测与向量：InsightFace `buffalo_l`
 - 推理：ONNX Runtime CPU
 - 相似度：归一化向量的点积，即余弦相似度
 - 索引：NumPy 压缩矩阵
 
-当前方案没有远程后端。Streamlit 服务只监听 `127.0.0.1`。
+当前方案没有远程后端。Python 原型通过本地 Streamlit 服务运行；桌面版通过 Tauri 子进程直接调用内置引擎。
 
 ## 开源协议与模型许可
 
@@ -164,12 +199,12 @@ InsightFace 模型默认缓存在：
 
 ## 桌面客户端规划
 
-当前版本是 Streamlit 本地 Demo。macOS 与 Windows 客户端建议采用：
+当前已实现 Tauri macOS 客户端第一版，并已去掉桌面版对 Streamlit 的依赖。后续 macOS 与 Windows 的共同方向仍建议采用：
 
-- Tauri + React/TypeScript 作为跨平台桌面 UI；
+- Tauri + 前端 UI 作为跨平台桌面界面；
 - Python 引擎封装当前人脸检测、索引、检索和导出逻辑；
 - PyInstaller 分别打包 macOS / Windows 本地引擎；
-- 客户端与引擎通过本地子进程 JSON-RPC 通信。
+- 客户端与引擎通过本地子进程 JSON/stdout 通信。
 
 详细方案见 [docs/CLIENT_DESIGN.md](docs/CLIENT_DESIGN.md)。
 
