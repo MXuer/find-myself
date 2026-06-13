@@ -143,12 +143,16 @@ fn bundled_backend_dir(app: &AppHandle) -> Result<PathBuf, String> {
 
 fn bundled_backend_executable(app: &AppHandle) -> Result<PathBuf, String> {
     let root = bundled_backend_dir(app)?;
-    let executable = if cfg!(target_os = "macos") {
-        root.join("find-myself-backend").join("find-myself-backend")
+    let binary_name = if cfg!(target_os = "windows") {
+        "find-myself-backend.exe"
     } else {
-        root.join("find-myself-backend")
+        "find-myself-backend"
     };
-    Ok(executable)
+    let collected = root.join("find-myself-backend").join(binary_name);
+    if collected.exists() {
+        return Ok(collected);
+    }
+    Ok(root.join(binary_name))
 }
 
 fn engine_log(app: &AppHandle) -> Result<PathBuf, String> {
@@ -213,11 +217,25 @@ fn append_log(app: &AppHandle, content: &[u8]) -> Result<(), String> {
     Ok(())
 }
 
+#[cfg(target_os = "windows")]
+fn engine_command(executable: &PathBuf) -> Command {
+    let mut command = Command::new(executable);
+    use std::os::windows::process::CommandExt;
+    const CREATE_NO_WINDOW: u32 = 0x08000000;
+    command.creation_flags(CREATE_NO_WINDOW);
+    command
+}
+
+#[cfg(not(target_os = "windows"))]
+fn engine_command(executable: &PathBuf) -> Command {
+    Command::new(executable)
+}
+
 fn run_engine(app: &AppHandle, args: &[String]) -> Result<String, String> {
     ensure_dirs(app)?;
 
     let executable = bundled_backend_executable(app)?;
-    let output = Command::new(&executable)
+    let output = engine_command(&executable)
         .args(args)
         .env("FIND_MYSELF_DATA_DIR", data_dir(app)?)
         .output()
@@ -275,6 +293,80 @@ fn choose_folder_macos(prompt: &str) -> Result<String, String> {
     Ok(String::from_utf8_lossy(&output.stdout).trim().to_string())
 }
 
+fn choose_folder_windows(prompt: &str) -> Result<String, String> {
+    let escaped = prompt.replace('\'', "''");
+    let script = format!(
+        "Add-Type -AssemblyName System.Windows.Forms; \
+         [Console]::OutputEncoding = [System.Text.Encoding]::UTF8; \
+         $dialog = New-Object System.Windows.Forms.FolderBrowserDialog; \
+         $dialog.Description = '{escaped}'; \
+         if ($dialog.ShowDialog() -eq [System.Windows.Forms.DialogResult]::OK) {{ \
+           Write-Output $dialog.SelectedPath \
+         }} else {{ exit 1 }}"
+    );
+
+    let output = Command::new("powershell.exe")
+        .args(["-NoProfile", "-Sta", "-Command", &script])
+        .output()
+        .map_err(|err| format!("failed to open folder picker: {err}"))?;
+
+    if !output.status.success() {
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        let message = stderr.trim();
+        return Err(if message.is_empty() {
+            "folder picker was cancelled".to_string()
+        } else {
+            message.to_string()
+        });
+    }
+
+    Ok(String::from_utf8_lossy(&output.stdout).trim().to_string())
+}
+
+fn choose_folder_native(prompt: &str) -> Result<String, String> {
+    if cfg!(target_os = "macos") {
+        return choose_folder_macos(prompt);
+    }
+    if cfg!(target_os = "windows") {
+        return choose_folder_windows(prompt);
+    }
+    Err("folder picker is not implemented on this platform".to_string())
+}
+
+fn open_path(path: PathBuf, reveal: bool) -> Result<(), String> {
+    if cfg!(target_os = "macos") {
+        let mut command = Command::new("open");
+        if reveal && path.is_file() {
+            command.arg("-R").arg(path);
+        } else {
+            command.arg(path);
+        }
+        command
+            .status()
+            .map_err(|err| format!("failed to open path: {err}"))?;
+        return Ok(());
+    }
+
+    if cfg!(target_os = "windows") {
+        let mut command = Command::new("explorer.exe");
+        if reveal && path.is_file() {
+            command.arg(format!("/select,{}", path.display()));
+        } else {
+            command.arg(path);
+        }
+        command
+            .status()
+            .map_err(|err| format!("failed to open path: {err}"))?;
+        return Ok(());
+    }
+
+    Command::new("xdg-open")
+        .arg(path)
+        .status()
+        .map_err(|err| format!("failed to open path: {err}"))?;
+    Ok(())
+}
+
 fn update_last_error(shared: &State<SharedRuntime>, message: Option<String>) {
     if let Ok(mut state) = shared.inner.lock() {
         state.last_error = message;
@@ -292,7 +384,8 @@ fn current_status(app: &AppHandle, shared: &SharedRuntime) -> Result<AppStatus, 
 
     let library = if runtime.ready {
         let raw = run_engine(app, &[String::from("stats")])?;
-        serde_json::from_str::<LibraryStats>(&raw).map_err(|err| format!("invalid stats payload: {err}"))?
+        serde_json::from_str::<LibraryStats>(&raw)
+            .map_err(|err| format!("invalid stats payload: {err}"))?
     } else {
         LibraryStats {
             data_dir: data_dir(app)?.display().to_string(),
@@ -325,21 +418,31 @@ fn app_status(app: AppHandle, shared: State<SharedRuntime>) -> Result<AppStatus,
 
 #[tauri::command]
 fn choose_folder(prompt: String) -> Result<String, String> {
-    choose_folder_macos(&prompt)
+    choose_folder_native(&prompt)
 }
 
 #[tauri::command]
-fn index_folder(app: AppHandle, shared: State<SharedRuntime>, folder: String, recursive: bool) -> Result<IndexReport, String> {
+fn index_folder(
+    app: AppHandle,
+    shared: State<SharedRuntime>,
+    folder: String,
+    recursive: bool,
+) -> Result<IndexReport, String> {
     let args = vec![
         String::from("index-folder"),
         String::from("--folder"),
         folder,
         String::from("--recursive"),
-        if recursive { String::from("true") } else { String::from("false") },
+        if recursive {
+            String::from("true")
+        } else {
+            String::from("false")
+        },
     ];
 
     let raw = run_engine(&app, &args)?;
-    let report = serde_json::from_str::<IndexReport>(&raw).map_err(|err| format!("invalid index payload: {err}"))?;
+    let report = serde_json::from_str::<IndexReport>(&raw)
+        .map_err(|err| format!("invalid index payload: {err}"))?;
     update_last_error(&shared, None);
     Ok(report)
 }
@@ -365,7 +468,8 @@ fn search_reference(
     ];
 
     let raw = run_engine(&app, &args)?;
-    let response = serde_json::from_str::<SearchResponse>(&raw).map_err(|err| format!("invalid search payload: {err}"))?;
+    let response = serde_json::from_str::<SearchResponse>(&raw)
+        .map_err(|err| format!("invalid search payload: {err}"))?;
     let _ = fs::remove_file(path);
     update_last_error(&shared, None);
     Ok(response)
@@ -387,7 +491,8 @@ fn export_matches(
         payload,
     ];
     let raw = run_engine(&app, &args)?;
-    let response = serde_json::from_str::<ExportResponse>(&raw).map_err(|err| format!("invalid export payload: {err}"))?;
+    let response = serde_json::from_str::<ExportResponse>(&raw)
+        .map_err(|err| format!("invalid export payload: {err}"))?;
     update_last_error(&shared, None);
     Ok(response)
 }
@@ -395,7 +500,8 @@ fn export_matches(
 #[tauri::command]
 fn reset_index(app: AppHandle, shared: State<SharedRuntime>) -> Result<LibraryStats, String> {
     let raw = run_engine(&app, &[String::from("reset-index")])?;
-    let stats = serde_json::from_str::<LibraryStats>(&raw).map_err(|err| format!("invalid reset payload: {err}"))?;
+    let stats = serde_json::from_str::<LibraryStats>(&raw)
+        .map_err(|err| format!("invalid reset payload: {err}"))?;
     update_last_error(&shared, None);
     Ok(stats)
 }
@@ -403,34 +509,21 @@ fn reset_index(app: AppHandle, shared: State<SharedRuntime>) -> Result<LibrarySt
 #[tauri::command]
 fn open_logs_dir(app: AppHandle) -> Result<(), String> {
     ensure_dirs(&app)?;
-    let directory = logs_dir(&app)?;
-    Command::new("open")
-        .arg(directory)
-        .status()
-        .map_err(|err| format!("failed to open logs dir: {err}"))?;
-    Ok(())
+    open_path(logs_dir(&app)?, false)
 }
 
 #[tauri::command]
 fn reveal_path(path: String) -> Result<(), String> {
     let target = PathBuf::from(path);
-    let mut command = Command::new("open");
-    if target.is_dir() {
-        command.arg(target);
-    } else {
-        command.arg("-R").arg(target);
-    }
-    command
-        .status()
-        .map_err(|err| format!("failed to reveal path: {err}"))?;
-    Ok(())
+    open_path(target, true)
 }
 
 pub fn run() {
     tauri::Builder::default()
         .manage(SharedRuntime::default())
         .setup(|app| {
-            ensure_dirs(&app.handle()).map_err(|err| -> Box<dyn std::error::Error> { err.into() })?;
+            ensure_dirs(&app.handle())
+                .map_err(|err| -> Box<dyn std::error::Error> { err.into() })?;
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![

@@ -1,4 +1,4 @@
-import { existsSync, mkdirSync, rmSync, symlinkSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, rmSync, symlinkSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { spawnSync } from "node:child_process";
@@ -6,8 +6,9 @@ import { spawnSync } from "node:child_process";
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const tauriRoot = resolve(__dirname, "..");
 const projectRoot = resolve(tauriRoot, "..", "..");
+const packageJson = JSON.parse(readFileSync(join(projectRoot, "package.json"), "utf8"));
 const productName = "Find Myself";
-const version = "0.2.0";
+const version = packageJson.version;
 const appPath = join(tauriRoot, "src-tauri", "target", "release", "bundle", "macos", `${productName}.app`);
 const stagingDir = join(tauriRoot, ".dmg-staging");
 const outputDir = join(projectRoot, "dist");

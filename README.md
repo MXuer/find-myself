@@ -18,7 +18,7 @@
 当前仓库已经可以生成一个 `Apple Silicon` Mac 用的桌面安装包：
 
 ```text
-dist/Find Myself_0.2.0_arm64.dmg
+dist/Find Myself_0.2.1_arm64.dmg
 ```
 
 当前桌面版状态：
@@ -39,6 +39,22 @@ env -u HTTP_PROXY -u HTTPS_PROXY -u ALL_PROXY npm run tauri:build:dmg
 ```
 
 更多发布细节见 [docs/MAC_RELEASE.md](docs/MAC_RELEASE.md)。
+
+## Windows 桌面版
+
+当前也支持在 Windows x64 上生成 NSIS 安装器。Windows 构建必须在 Windows 环境中完成，推荐使用 GitHub Actions：
+
+```bash
+npm install
+npm run tauri:build:windows
+```
+
+发布标签 `v*` 会触发 GitHub Actions，同时构建：
+
+- macOS Apple Silicon `.dmg`
+- Windows x64 `.exe` 安装器
+
+当前 Windows 构建同样是未签名测试版，因此普通用户下载后可能看到 SmartScreen 提示。更多细节见 [docs/WINDOWS_RELEASE.md](docs/WINDOWS_RELEASE.md)。
 
 ## Python 原型最快启动方式
 

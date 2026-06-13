@@ -1,14 +1,15 @@
 {
   "name": "find-myself",
   "private": true,
-  "version": "0.2.0",
+  "version": "0.2.1",
   "description": "Native Tauri desktop shell for Find Myself",
   "scripts": {
     "tauri:prepare": "node desktop/tauri/scripts/build-backend.mjs && node desktop/tauri/scripts/build-ui.mjs",
     "tauri:ui:dev": "node desktop/tauri/scripts/dev-ui.mjs",
     "tauri:dev": "npm run tauri:prepare && tauri dev --config desktop/tauri/src-tauri/tauri.conf.json",
     "tauri:build": "npm run tauri:prepare && tauri build --bundles app --config desktop/tauri/src-tauri/tauri.conf.json",
-    "tauri:build:dmg": "npm run tauri:build && node desktop/tauri/scripts/build-dmg.mjs"
+    "tauri:build:dmg": "npm run tauri:build && node desktop/tauri/scripts/build-dmg.mjs",
+    "tauri:build:windows": "npm run tauri:prepare && tauri build --bundles nsis --config desktop/tauri/src-tauri/tauri.conf.json"
   },
   "devDependencies": {
     "@tauri-apps/cli": "^2.0.0"

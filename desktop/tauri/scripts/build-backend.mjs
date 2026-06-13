@@ -1,5 +1,6 @@
 import { createHash } from "node:crypto";
 import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { platform } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { spawnSync } from "node:child_process";
@@ -12,9 +13,10 @@ const backendRoot = join(projectRoot, "desktop", "backend");
 const backendDistDir = join(tauriRoot, "resources", "backend");
 const backendBuildDir = join(backendRoot, "build");
 const backendSpec = join(backendRoot, "find_myself_backend.spec");
-const requirements = join(projectRoot, "requirements.txt");
+const requirements = join(backendRoot, "requirements.txt");
 const engineCli = join(backendRoot, "engine_cli.py");
 const stampFile = join(buildVenvDir, ".build-stamp");
+const isWindows = platform() === "win32";
 
 function run(command, args, options = {}) {
   const result = spawnSync(command, args, {
@@ -38,7 +40,15 @@ function buildFingerprint() {
 }
 
 function pythonBin() {
+  if (isWindows) {
+    return join(buildVenvDir, "Scripts", "python.exe");
+  }
   return join(buildVenvDir, "bin", "python");
+}
+
+function bundledBackendExecutable() {
+  const binaryName = isWindows ? "find-myself-backend.exe" : "find-myself-backend";
+  return join(backendDistDir, "find-myself-backend", binaryName);
 }
 
 function ensureBuildVenv() {
@@ -52,7 +62,7 @@ function installBuildDepsIfNeeded() {
   const currentFingerprint = buildFingerprint();
   const previousFingerprint = existsSync(stampFile) ? readFileSync(stampFile, "utf8").trim() : "";
 
-  if (currentFingerprint === previousFingerprint && existsSync(join(backendDistDir, "find-myself-backend"))) {
+  if (currentFingerprint === previousFingerprint && existsSync(bundledBackendExecutable())) {
     return;
   }
 
