@@ -21,6 +21,10 @@
   box-sizing: border-box;
 }
 
+[hidden] {
+  display: none !important;
+}
+
 html,
 body {
   margin: 0;
@@ -870,6 +874,10 @@ input[type="range"] {
   aspect-ratio: 4 / 3;
 }
 
+.inspector-image[hidden] {
+  display: none;
+}
+
 .inspector-meta {
   display: grid;
   gap: 5px;
@@ -937,24 +945,26 @@ input[type="range"] {
 
 .busy-overlay {
   position: fixed;
-  inset: 0;
+  right: 20px;
+  bottom: 20px;
   display: grid;
   place-items: center;
-  background: rgba(6, 10, 15, 0.58);
-  backdrop-filter: blur(10px);
+  background: transparent;
   z-index: 20;
+  pointer-events: none;
 }
 
 .busy-card {
   display: grid;
   gap: 12px;
   place-items: center;
-  width: min(360px, calc(100vw - 40px));
-  padding: 20px 24px;
+  width: min(360px, calc(100vw - 24px));
+  padding: 16px;
   border: 1px solid var(--line-strong);
   border-radius: 12px;
   background: rgba(17, 24, 32, 0.96);
   box-shadow: var(--shadow);
+  pointer-events: auto;
 }
 
 .busy-card strong,
@@ -966,6 +976,23 @@ input[type="range"] {
   color: var(--muted);
   line-height: 1.45;
   font-size: 13px;
+}
+
+.busy-card code {
+  width: 100%;
+  padding: 8px;
+  overflow-wrap: anywhere;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.035);
+  color: #cfe0ff;
+  font-family: "SF Mono", ui-monospace, Menlo, monospace;
+  font-size: 11px;
+  line-height: 1.35;
+}
+
+.busy-card code:empty {
+  display: none;
 }
 
 .busy-card .secondary-button {

@@ -18,7 +18,7 @@
 当前仓库已经可以生成一个 `Apple Silicon` Mac 用的桌面安装包：
 
 ```text
-dist/Find Myself_0.2.4_arm64.dmg
+dist/Find Myself_0.2.5_arm64.dmg
 ```
 
 当前桌面版状态：

@@ -385,9 +385,17 @@ fn open_path(path: PathBuf, reveal: bool) -> Result<(), String> {
         } else {
             command.arg(path);
         }
-        command
-            .status()
+        let output = command
+            .output()
             .map_err(|err| format!("failed to open path: {err}"))?;
+        if !output.status.success() {
+            let stderr = String::from_utf8_lossy(&output.stderr);
+            return Err(if stderr.trim().is_empty() {
+                format!("open exited with status {}", output.status)
+            } else {
+                stderr.trim().to_string()
+            });
+        }
         return Ok(());
     }
 
@@ -398,16 +406,32 @@ fn open_path(path: PathBuf, reveal: bool) -> Result<(), String> {
         } else {
             command.arg(path);
         }
-        command
-            .status()
+        let output = command
+            .output()
             .map_err(|err| format!("failed to open path: {err}"))?;
+        if !output.status.success() {
+            let stderr = String::from_utf8_lossy(&output.stderr);
+            return Err(if stderr.trim().is_empty() {
+                format!("explorer exited with status {}", output.status)
+            } else {
+                stderr.trim().to_string()
+            });
+        }
         return Ok(());
     }
 
-    Command::new("xdg-open")
+    let output = Command::new("xdg-open")
         .arg(path)
-        .status()
+        .output()
         .map_err(|err| format!("failed to open path: {err}"))?;
+    if !output.status.success() {
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        return Err(if stderr.trim().is_empty() {
+            format!("xdg-open exited with status {}", output.status)
+        } else {
+            stderr.trim().to_string()
+        });
+    }
     Ok(())
 }
 

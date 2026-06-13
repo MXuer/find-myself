@@ -84,6 +84,7 @@ const ui = {
   busyOverlay: document.querySelector("#busyOverlay"),
   busyText: document.querySelector("#busyText"),
   busyHint: document.querySelector("#busyHint"),
+  busyLogPath: document.querySelector("#busyLogPath"),
   busyLogsButton: document.querySelector("#busyLogsButton"),
 };
 
@@ -120,6 +121,7 @@ function setBusy(busy, message = "处理中...", hint = "首次识别会加载�
   ui.busyOverlay.hidden = !busy;
   ui.busyText.textContent = message;
   ui.busyHint.textContent = hint;
+  ui.busyLogPath.textContent = state.status?.paths?.logsDir || "";
 
   if (state.busyTimer) {
     window.clearInterval(state.busyTimer);
@@ -157,6 +159,24 @@ async function callWithTimeout(command, args, timeoutMs, timeoutMessage) {
     return await Promise.race([call(command, args), timeout]);
   } finally {
     window.clearTimeout(timeoutId);
+  }
+}
+
+async function openLogs() {
+  const logsPath = state.status?.paths?.logsDir || "";
+  if (state.busy && logsPath) {
+    ui.busyHint.textContent = `正在打开日志目录。路径：${logsPath}`;
+    ui.busyLogPath.textContent = logsPath;
+  } else if (logsPath) {
+    setBanner("warning", `正在打开日志目录：${logsPath}`);
+  }
+
+  await call("open_logs_dir");
+
+  if (state.busy && logsPath) {
+    ui.busyHint.textContent = `已请求打开日志目录。如果 Finder 没有弹出，可手动打开下面路径。`;
+  } else if (logsPath) {
+    setBanner("success", `已请求打开日志目录：${logsPath}`);
   }
 }
 
@@ -456,7 +476,9 @@ function renderInspector() {
 
   if (!item) {
     ui.inspectorImage.removeAttribute("src");
+    ui.inspectorImage.hidden = true;
     ui.inspectorFace.removeAttribute("src");
+    ui.inspectorFace.hidden = true;
     ui.inspectorBadge.textContent = "-";
     ui.inspectorName.textContent = "尚未选择";
     ui.inspectorScore.textContent = "相似度 -";
@@ -471,10 +493,13 @@ function renderInspector() {
   }
 
   ui.inspectorImage.src = item.annotatedImage;
+  ui.inspectorImage.hidden = false;
   if (item.faceThumb) {
     ui.inspectorFace.src = item.faceThumb;
+    ui.inspectorFace.hidden = false;
   } else {
     ui.inspectorFace.removeAttribute("src");
+    ui.inspectorFace.hidden = true;
   }
   ui.inspectorBadge.textContent = formatPercent(item.score);
   ui.inspectorName.textContent = item.originalName;
@@ -653,12 +678,12 @@ function clearReference() {
 function bindEvents() {
   ui.refreshButton.addEventListener("click", () => refreshStatus().catch(handleError));
   ui.resetButton.addEventListener("click", () => resetIndex().catch(handleError));
-  ui.logsButton.addEventListener("click", () => call("open_logs_dir").catch(handleError));
+  ui.logsButton.addEventListener("click", () => openLogs().catch(handleError));
   ui.revealDataButton.addEventListener("click", () => call("reveal_path", { path: state.status?.paths?.dataDir || "" }).catch(handleError));
   ui.pickFolderButton.addEventListener("click", () => pickFolder().catch(handleError));
   ui.indexButton.addEventListener("click", () => indexFolder().catch(handleError));
   ui.searchButton.addEventListener("click", () => searchReference().catch(handleError));
-  ui.busyLogsButton.addEventListener("click", () => call("open_logs_dir").catch(handleError));
+  ui.busyLogsButton.addEventListener("click", () => openLogs().catch(handleError));
   ui.exportButton.addEventListener("click", () => exportMatches().catch(handleError));
   ui.exportCurrentButton.addEventListener("click", () => exportCurrentMatch().catch(handleError));
   ui.referenceInput.addEventListener("change", handleReferenceChange);
