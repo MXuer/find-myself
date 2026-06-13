@@ -18,6 +18,9 @@ const state = {
   exportedKeys: new Set(),
   resultView: "lightTable",
   preset: "balanced",
+  busy: false,
+  busyStartedAt: 0,
+  busyTimer: null,
 };
 
 const ui = {
@@ -80,6 +83,8 @@ const ui = {
   exportButton: document.querySelector("#exportButton"),
   busyOverlay: document.querySelector("#busyOverlay"),
   busyText: document.querySelector("#busyText"),
+  busyHint: document.querySelector("#busyHint"),
+  busyLogsButton: document.querySelector("#busyLogsButton"),
 };
 
 function setBanner(kind, message) {
@@ -87,9 +92,53 @@ function setBanner(kind, message) {
   ui.statusBanner.textContent = message;
 }
 
-function setBusy(busy, message = "处理中...") {
+function syncActionState() {
+  const runtimeReady = Boolean(state.status?.runtime?.ready);
+  const indexReady = Boolean(state.status?.library?.indexReady);
+  const hasFolder = Boolean(state.selectedFolder);
+  const hasReference = Boolean(state.referenceFile);
+
+  ui.refreshButton.disabled = state.busy;
+  ui.resetButton.disabled = state.busy;
+  ui.pickFolderButton.disabled = state.busy;
+  ui.indexButton.disabled = state.busy || !runtimeReady || !hasFolder;
+  ui.searchButton.disabled = state.busy || !runtimeReady || !indexReady || !hasReference;
+
+  if (!runtimeReady) {
+    ui.searchButton.textContent = "引擎不可用";
+  } else if (!indexReady) {
+    ui.searchButton.textContent = "先准备照片库";
+  } else if (!hasReference) {
+    ui.searchButton.textContent = "先选择参考照";
+  } else {
+    ui.searchButton.textContent = "开始找照片";
+  }
+}
+
+function setBusy(busy, message = "处理中...", hint = "首次识别会加载本地模型，可能需要一点时间。") {
+  state.busy = busy;
   ui.busyOverlay.hidden = !busy;
   ui.busyText.textContent = message;
+  ui.busyHint.textContent = hint;
+
+  if (state.busyTimer) {
+    window.clearInterval(state.busyTimer);
+    state.busyTimer = null;
+  }
+
+  if (busy) {
+    state.busyStartedAt = Date.now();
+    state.busyTimer = window.setInterval(() => {
+      const elapsed = Math.round((Date.now() - state.busyStartedAt) / 1000);
+      if (elapsed >= 90) {
+        ui.busyHint.textContent = `已等待 ${elapsed} 秒。首次使用可能正在下载模型；如果长期停留，请打开日志目录查看 engine.log。`;
+      } else if (elapsed >= 30) {
+        ui.busyHint.textContent = `已等待 ${elapsed} 秒。模型加载和批量照片处理会比较慢，请保持应用打开。`;
+      }
+    }, 1000);
+  }
+
+  syncActionState();
 }
 
 async function call(command, args = {}) {
@@ -97,6 +146,18 @@ async function call(command, args = {}) {
     throw new Error("Tauri API unavailable.");
   }
   return invoke(command, args);
+}
+
+async function callWithTimeout(command, args, timeoutMs, timeoutMessage) {
+  let timeoutId;
+  const timeout = new Promise((_, reject) => {
+    timeoutId = window.setTimeout(() => reject(new Error(timeoutMessage)), timeoutMs);
+  });
+  try {
+    return await Promise.race([call(command, args), timeout]);
+  } finally {
+    window.clearTimeout(timeoutId);
+  }
 }
 
 function formatPercent(score) {
@@ -201,6 +262,7 @@ function renderStatus() {
   } else {
     setBanner("danger", status.runtime.error || "内置引擎不可用。");
   }
+  syncActionState();
 }
 
 function renderReferencePreview(src = "", name = "上传一张清晰参考照", hint = "最好是正脸、少遮挡、只有自己。") {
@@ -435,6 +497,7 @@ async function pickFolder() {
   }
   state.selectedFolder = selected;
   renderStatus();
+  syncActionState();
 }
 
 async function indexFolder() {
@@ -442,12 +505,17 @@ async function indexFolder() {
     throw new Error("请先选择照片文件夹。");
   }
 
-  setBusy(true, "正在准备照片库...");
+  setBusy(true, "正在准备照片库...", "首次处理会加载人脸模型；照片多时会逐张提取人脸，请保持应用打开。");
   try {
-    const report = await call("index_folder", {
-      folder: state.selectedFolder,
-      recursive: ui.recursiveToggle.checked,
-    });
+    const report = await callWithTimeout(
+      "index_folder",
+      {
+        folder: state.selectedFolder,
+        recursive: ui.recursiveToggle.checked,
+      },
+      31 * 60 * 1000,
+      "准备照片库超时。请打开日志目录查看 engine.log，确认模型下载或照片处理是否卡住。",
+    );
     await refreshStatus();
     setBanner("success", `照片库已准备：新增 ${report.addedPhotos} 张照片、${report.addedFaces} 张人脸。`);
   } finally {
@@ -459,16 +527,24 @@ async function searchReference() {
   if (!state.referenceFile) {
     throw new Error("请先选择参考照片。");
   }
+  if (!state.status?.library?.indexReady) {
+    throw new Error("请先选择照片文件夹，并点击“准备照片库”。");
+  }
 
-  setBusy(true, "正在找照片...");
+  setBusy(true, "正在找照片...", "正在检测参考照并比对本地照片库。首次使用可能需要加载模型。");
   try {
     const bytes = Array.from(new Uint8Array(await state.referenceFile.arrayBuffer()));
-    const response = await call("search_reference", {
-      filename: state.referenceFile.name,
-      bytes,
-      threshold: Number(ui.thresholdRange.value),
-      limit: Number(ui.limitRange.value),
-    });
+    const response = await callWithTimeout(
+      "search_reference",
+      {
+        filename: state.referenceFile.name,
+        bytes,
+        threshold: Number(ui.thresholdRange.value),
+        limit: Number(ui.limitRange.value),
+      },
+      9 * 60 * 1000,
+      "搜索超时。请打开日志目录查看 engine.log，确认模型下载或本地识别是否卡住。",
+    );
 
     if (response.referencePreview) {
       renderReferencePreview(response.referencePreview, state.referenceFile.name, response.warning || "参考照已用于本次搜索。");
@@ -553,6 +629,7 @@ async function resetIndex() {
 function handleReferenceChange(event) {
   const [file] = event.target.files || [];
   state.referenceFile = file || null;
+  syncActionState();
 
   if (!file) {
     renderReferencePreview();
@@ -570,6 +647,7 @@ function clearReference() {
   state.referenceFile = null;
   ui.referenceInput.value = "";
   renderReferencePreview();
+  syncActionState();
 }
 
 function bindEvents() {
@@ -580,6 +658,7 @@ function bindEvents() {
   ui.pickFolderButton.addEventListener("click", () => pickFolder().catch(handleError));
   ui.indexButton.addEventListener("click", () => indexFolder().catch(handleError));
   ui.searchButton.addEventListener("click", () => searchReference().catch(handleError));
+  ui.busyLogsButton.addEventListener("click", () => call("open_logs_dir").catch(handleError));
   ui.exportButton.addEventListener("click", () => exportMatches().catch(handleError));
   ui.exportCurrentButton.addEventListener("click", () => exportCurrentMatch().catch(handleError));
   ui.referenceInput.addEventListener("change", handleReferenceChange);
@@ -612,6 +691,7 @@ async function bootstrap() {
   renderReferencePreview();
   renderResults();
   bindEvents();
+  syncActionState();
   await refreshStatus();
 }
 

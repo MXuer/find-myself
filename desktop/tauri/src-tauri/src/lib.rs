@@ -3,9 +3,10 @@ use std::env::consts::{ARCH, OS};
 use std::fs::{self, OpenOptions};
 use std::io::{self, Write};
 use std::path::PathBuf;
-use std::process::Command;
+use std::process::{Command, Stdio};
 use std::sync::{Arc, Mutex};
-use std::time::{SystemTime, UNIX_EPOCH};
+use std::thread;
+use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 use tauri::{AppHandle, Manager, State};
 
 #[derive(Default)]
@@ -231,15 +232,58 @@ fn engine_command(executable: &PathBuf) -> Command {
     Command::new(executable)
 }
 
+fn engine_timeout(args: &[String]) -> Duration {
+    match args.first().map(|item| item.as_str()) {
+        Some("stats") => Duration::from_secs(30),
+        Some("search-image") => Duration::from_secs(9 * 60),
+        Some("index-folder") => Duration::from_secs(30 * 60),
+        Some("export-matches") => Duration::from_secs(10 * 60),
+        Some("reset-index") => Duration::from_secs(60),
+        _ => Duration::from_secs(5 * 60),
+    }
+}
+
 fn run_engine(app: &AppHandle, args: &[String]) -> Result<String, String> {
     ensure_dirs(app)?;
 
     let executable = bundled_backend_executable(app)?;
-    let output = engine_command(&executable)
+    let timeout = engine_timeout(args);
+    let started = Instant::now();
+    let mut child = engine_command(&executable)
         .args(args)
         .env("FIND_MYSELF_DATA_DIR", data_dir(app)?)
-        .output()
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
         .map_err(|err| format!("failed to run bundled engine: {err}"))?;
+
+    loop {
+        match child
+            .try_wait()
+            .map_err(|err| format!("failed to wait for bundled engine: {err}"))?
+        {
+            Some(_) => break,
+            None if started.elapsed() >= timeout => {
+                let _ = child.kill();
+                let output = child
+                    .wait_with_output()
+                    .map_err(|err| format!("failed to collect timed-out engine output: {err}"))?;
+                let _ = append_log(app, &output.stderr);
+                let timeout_message = format!(
+                    "engine timeout after {} seconds while running {:?}",
+                    timeout.as_secs(),
+                    args
+                );
+                let _ = append_log(app, timeout_message.as_bytes());
+                return Err("本地识别引擎执行超时。首次使用可能卡在模型下载；请检查网络，或打开日志目录查看 engine.log。".into());
+            }
+            None => thread::sleep(Duration::from_millis(200)),
+        }
+    }
+
+    let output = child
+        .wait_with_output()
+        .map_err(|err| format!("failed to collect bundled engine output: {err}"))?;
 
     let _ = append_log(app, &output.stderr);
 
